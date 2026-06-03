@@ -8,14 +8,13 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 def format_duration(seconds):
-    """Converts a duration in seconds into 'DD HH:MM:SS' string format."""
-    days = int(seconds // 86400)
-    seconds %= 86400
+    """Converts a duration in seconds into a strict 'HH:MM:SS' string format."""
     hours = int(seconds // 3600)
     seconds %= 3600
     minutes = int(seconds // 60)
     seconds = int(seconds % 60)
-    return f"{days:02d} {hours:02d}:{minutes:02d}:{seconds:02d}"
+    # Output is a pure string text
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 def draw_progress_bar(current, total, bar_length=30):
     """Generates and prints a dynamic text-based progress bar."""
@@ -26,11 +25,10 @@ def draw_progress_bar(current, total, bar_length=30):
     sys.stdout.flush()
 
 def extract_batch_metadata(reader):
-    """Scans the PDF to find the Start Batch and End Batch timestamps."""
+    """Scans the PDF pages to dynamically extract Start and End Batch timestamps."""
     batch_start = None
     batch_end = None
     
-    # Check first few and last few pages to quickly extract metadata
     pages_to_check = list(reader.pages[:5]) + list(reader.pages[-5:])
     for page in pages_to_check:
         text = page.extract_text()
@@ -40,7 +38,6 @@ def extract_batch_metadata(reader):
         lines = text.split('\n')
         for line in lines:
             if "Start Batch" in line:
-                # Expected format segment: "Start Batch 07 May 2026 18:25:44"
                 parts = line.split("Start Batch")[-1].strip().split()
                 if len(parts) >= 4:
                     try:
@@ -49,7 +46,6 @@ def extract_batch_metadata(reader):
                     except ValueError:
                         pass
             if "End Batch" in line:
-                # Expected format segment: "End Batch 08 May 2026 02:52:20"
                 parts = line.split("End Batch")[-1].strip().split()
                 if len(parts) >= 4:
                     try:
@@ -64,7 +60,7 @@ def extract_batch_metadata(reader):
     return batch_start, batch_end
 
 def process_single_pdf(pdf_path, output_excel_path):
-    """Parses a single alarm PDF, matches incomplete states with metadata, and formats Excel."""
+    """Parses a single alarm PDF, matches incomplete states, and formats styled Excel workbook."""
     section_rows = {'Filler': [], 'Isolator': []}
     valid_states = {'UNACK_ALM', 'ACK_RTN', 'ACK'}
     
@@ -78,10 +74,8 @@ def process_single_pdf(pdf_path, output_excel_path):
     if total_pages == 0:
         return False
 
-    # 1. Dynamically find Batch Boundaries
     batch_start, batch_end = extract_batch_metadata(reader)
     
-    # 2. Extract Alarm Log Rows
     for page_num, page in enumerate(reader.pages, start=1):
         draw_progress_bar(page_num, total_pages)
         text = page.extract_text()
@@ -115,11 +109,10 @@ def process_single_pdf(pdf_path, output_excel_path):
                         continue
     print()
 
-    # 3. Process Lifecycles and Write to Sheets
     try:
         with pd.ExcelWriter(output_excel_path, engine='openpyxl') as writer:
             for section, rows in section_rows.items():
-                rows.reverse()  # Flip to chronological order
+                rows.reverse()
                 
                 active_alarms = {}
                 alarm_summary = defaultdict(lambda: {
@@ -127,9 +120,6 @@ def process_single_pdf(pdf_path, output_excel_path):
                     'total_duration_secs': 0.0,
                     'remarks': set()
                 })
-                
-                # To capture alarms from a previous batch, we track keys that clear without an activation sequence first
-                cleared_without_start = set()
                 
                 for row in rows:
                     key = (row['code'], row['desc'])
@@ -142,24 +132,19 @@ def process_single_pdf(pdf_path, output_excel_path):
                         
                     elif state == 'ACK_RTN':
                         if key in active_alarms:
-                            # Balanced scenario
                             start_time = active_alarms[key]
                             duration = (dt - start_time).total_seconds()
                             alarm_summary[key]['total_duration_secs'] += duration
                             alarm_summary[key]['remarks'].add("Completed within batch")
                             del active_alarms[key]
                         else:
-                            # Scenario A: Spilled over from previous batch
                             if batch_start:
                                 duration = (dt - batch_start).total_seconds()
                                 if duration > 0:
                                     alarm_summary[key]['total_duration_secs'] += duration
-                            
-                            # Increment quantity because it was an active disruption during this batch window
                             alarm_summary[key]['quantity'] += 1
                             alarm_summary[key]['remarks'].add("Alarm active from previous batch (Duration calculated from Batch Start)")
                 
-                # Scenario B: Unacknowledged alarms lingering open until the end of the batch run
                 for key, start_time in active_alarms.items():
                     if batch_end:
                         duration = (batch_end - start_time).total_seconds()
@@ -167,10 +152,8 @@ def process_single_pdf(pdf_path, output_excel_path):
                             alarm_summary[key]['total_duration_secs'] += duration
                     alarm_summary[key]['remarks'].add("Alarm active until end of batch (Duration calculated to Batch End)")
                 
-                # Format to final Dataframe structure
                 formatted_table = []
                 for (code, desc), stats in alarm_summary.items():
-                    # Prioritize highlighting anomalies over standard "Completed within batch" remark
                     rem_set = stats['remarks']
                     if len(rem_set) > 1 and "Completed within batch" in rem_set:
                         rem_set.remove("Completed within batch")
@@ -179,6 +162,7 @@ def process_single_pdf(pdf_path, output_excel_path):
                     formatted_table.append({
                         'Alarms / Warnings': f"{code} {desc}",
                         'Quantity': stats['quantity'],
+                        # Build the exact string here
                         'Alarm on': format_duration(stats['total_duration_secs']),
                         'Remarks': remark_str,
                         '_sort_key': stats['quantity']
@@ -192,7 +176,6 @@ def process_single_pdf(pdf_path, output_excel_path):
                 sheet_name = f"Alarms {section}"
                 df.to_excel(writer, sheet_name=sheet_name, index=False)
                 
-                # Apply Style Palette
                 ws = writer.sheets[sheet_name]
                 ws.views.sheetView[0].showGridLines = True
                 
@@ -229,6 +212,9 @@ def process_single_pdf(pdf_path, output_excel_path):
                             cell.alignment = Alignment(horizontal="right", vertical="center")
                             cell.number_format = '#,##0'
                         elif c_idx == 3:
+                            # Explicitly force Excel to treat this cell as a raw String ('s') Text Block ('@')
+                            cell.data_type = 's'
+                            cell.number_format = '@'
                             cell.alignment = Alignment(horizontal="center", vertical="center")
                 
                 for col in ws.columns:
@@ -248,13 +234,15 @@ def process_all_batch_reports():
     output_dir = "output"
     
     if not os.path.exists(input_dir):
+        print(f"Creating missing directory: '{input_dir}' folder at root. Place your PDFs there.")
         os.makedirs(input_dir, exist_ok=True)
         return
+        
     os.makedirs(output_dir, exist_ok=True)
     
     files = [f for f in os.listdir(input_dir) if f.lower().endswith('.pdf')]
     if not files:
-        print("No PDF files found in 'input' directory.")
+        print(f"No PDF files found in the '{input_dir}' folder.")
         return
         
     print(f"Found {len(files)} file(s) to process.\n")
