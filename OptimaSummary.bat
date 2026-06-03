@@ -27,8 +27,9 @@ if not exist "%SCRIPT_FILE%" (
 echo [INFO] Validating Python environment dependencies...
 
 :: 4. Install dependencies targeting the absolute path string
-python -m pip install --upgrade pip
-python -m pip install -r "%REQ_FILE%" 
+python -m pip install --upgrade pip --quiet
+python -m pip install -r "%REQ_FILE%" --quiet
+
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Dependency installation failed. Please check your internet connection.
     pause
