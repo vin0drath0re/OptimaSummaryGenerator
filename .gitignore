@@ -1,0 +1,12 @@
+
+# Ignore all files with .pdf extension
+*.pdf
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Excel output tracking (Optional but recommended)
+output/

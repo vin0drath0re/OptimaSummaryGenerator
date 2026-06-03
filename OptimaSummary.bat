@@ -6,10 +6,14 @@ echo   System Automation: Alarm Batch Summary Report
 echo ===================================================
 echo.
 
-:: Define the target paths pointing directly into the src directory
+:: Define the target network paths explicitly using the batch location context
+set "ROOT_DIR=%~dp0"
 set "TARGET_DIR=%~dp0src"
 
-:: 1. Verify requirements.txt exists inside the src folder using Python's path parser
+:: Remove any trailing slashes from the ROOT_DIR variable string for tracking consistency
+if "%ROOT_DIR:~-1%"=="\" set "ROOT_DIR=%ROOT_DIR:~0,-1%"
+
+:: 1. Verify requirements.txt exists inside the src folder
 python -c "import os; print(os.path.exists(os.path.join(r'%TARGET_DIR%', 'requirements.txt')))" 2>nul | findstr /I "True" >nul
 if %ERRORLEVEL% NEQ 0 (
     echo [ERROR] Could not find requirements.txt inside the 'src' folder.
@@ -31,9 +35,9 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo [INFO] Validating Python environment dependencies...
 
-:: 3. Run pip install directly targeting the network path of requirements.txt
+:: 3. Run pip install using --quiet flags to prevent flooding the screen with "already satisfied" text
 python -m pip install --upgrade pip --quiet
-python -m pip install -r "%TARGET_DIR%\requirements.txt"
+python -m pip install -r "%TARGET_DIR%\requirements.txt" --quiet
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
@@ -48,8 +52,8 @@ echo [INFO] Launching Summary Generator...
 echo ---------------------------------------------------
 echo.
 
-:: 4. Force Python to step inside the 'src' directory context and execute your core logic
-python -c "import os, sys; os.chdir(r'%TARGET_DIR%'); sys.path.insert(0, os.getcwd()); import subprocess; subprocess.run(['python', 'script.py'])"
+:: 4. Force Python base to lock onto the root path context. The -B flag prevents __pycache__ from spawning.
+python -B -c "import os, sys; os.chdir(r'%ROOT_DIR%'); sys.path.insert(0, os.path.join(os.getcwd(), 'src')); import script; script.process_all_batch_reports()"
 
 echo.
 echo ---------------------------------------------------
